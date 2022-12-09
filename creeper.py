@@ -1,0 +1,326 @@
+#!/usr/bin/env python3
+#
+# mycrawler.py -- Wadih Khairallah
+#
+# Great site for testing https://crawler-test.com/
+
+from bs4 import BeautifulSoup
+from urllib.parse import quote, urlparse, urlunparse, urljoin
+import json
+import hashlib
+import sys
+import random
+import requests
+import socket
+import html
+from os.path import exists
+import os
+import getopt
+import signal
+import re
+import time
+
+# Get options
+argv = sys.argv[1:]
+visitedFile = '/tmp/visited.txt'
+unvisitedFile = '/tmp/unvisited.txt'
+seed = str() 
+seedHost = str() 
+sticky = False;
+preservePath = False
+depth = 5
+visited = {}
+unvisited = {}
+hashVals = [] 
+Sentry = False 
+
+# Set the user agent for requests
+headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0'}
+
+# Help output
+def help():
+    print(__file__, " -u [seed url] [options]")
+    print("\t-u\tSeed URL to start with.")
+    print("\t-h\tThis help output.")
+    print("\t-p\tSticky to URL path.")
+    print("\t-s\tMake crawler sticky to the given URL and subdomains.")
+    print("\t-c\tClear out visited and unvisited domains lists.")
+    sys.exit()
+
+# Signal Handler
+def handler(signum, frame):
+    global Sentry
+    Sentry = True 
+
+# Capture signals
+signal.signal(signal.SIGINT, handler)
+
+# Populate our visited and unvisited link files.
+def writeLinks():
+    # populate unvisited
+    f = open(unvisitedFile, "w")
+    for link in unvisited:
+        f.write(link + "\n")
+   
+    f.close()
+
+    #populate visited
+    f = open(visitedFile, "w")
+    for link in visited:
+        f.write(visited[link] + "<:>" + link + "\n")
+    
+    f.close()
+
+# Printing to stderr
+def eprint(*args, **kwargs):
+        print(*args, file=sys.stderr, **kwargs)
+
+def checkVisited(url):
+    if url in visited:
+        eprint("\tDuplicate URL: skipping...")
+        try:
+           del unvisited[url]
+        except:
+            pass
+        
+        return 1
+
+def urlClean(url):
+    orig = url
+    san = urlparse(url)
+
+    path = re.sub(r'\/+', '/', san.path)
+
+    url = urljoin(url, path)
+
+    if san.query:
+        url += '?' + san.query
+    
+    return url
+
+def urlHost(url):
+    san = urlparse(url)
+
+    return san.netloc
+
+# Extract data from given URLs
+def getData(url):
+    retVals = {}
+    textHash = str()
+    status_code = int()
+
+    hostname = urlHost(url) 
+
+    retVals["url"] = url 
+
+    eprint("Link:" + '[' + str(len(unvisited)) + '] ' + url)
+
+    if checkVisited(url) == 1:
+        return
+
+    try:
+        socket.gethostbyname(hostname)
+    except:
+        status_code = "no resolve"
+        pass
+
+    try:
+        x = requests.get(url, timeout=5, allow_redirects=True, headers=headers)
+        status_code = x.status_code 
+    except:
+        visited[url] = str(random.getrandbits(256))
+        return
+
+    if x.history:
+        retVals['redirect'] = {}
+        getCode = True 
+        for i in x.history:
+
+            if getCode:
+                status_code = i.status_code
+                getCode = False
+
+            retVals['redirect'][i.url] = i.status_code
+            eprint("\tredir: " + str(i.status_code) + " " + i.url)
+            visited[i.url] = str(random.getrandbits(256))
+
+        retVals['redirect'][x.url] = x.status_code
+        eprint("\tredir: " + str(x.status_code) + " " + x.url)
+        url = x.url
+
+        redirHost = urlHost(x.url)
+
+        if sticky:
+            if redirHost != hostname:
+                return
+         
+        if checkVisited(url) == 1:
+            return
+
+
+    if status_code:
+        soup = BeautifulSoup(x.text, 'html.parser')
+
+        #print(soup)
+
+        # Check for base url
+        base = soup.find('base')
+        if base:
+            try:
+                del unvisted[url]
+            except:
+                pass
+
+            visited[url] = str(random.getrandbits(256))
+            url = base['href']
+            url = urlClean(url)
+
+        # Get rendered text
+        text = re.sub(r'\n+', '\n', soup.get_text())
+        text = re.sub(r'\s+', " ", text)
+        text = re.sub(r'^ | $', "", text) 
+
+        # Get Title
+        try:
+            title = soup.title.string
+        except:
+            title = "undefined"
+
+        if title:
+            title = re.sub(r'\n+', '\n', title)
+            title = re.sub(r'\s+', " ", title)
+            title = re.sub(r'^ | $', "", title) 
+
+        # Create sha256 hash for page contents
+        hashObj = hashlib.sha256(text.encode())
+        textHash = hashObj.hexdigest()
+
+        if textHash in hashVals:
+            eprint("\tHex match: " + textHash + " skipping...")
+            visited[url] = textHash 
+            try:
+                del unvisted[url]
+            except:
+                pass
+
+            return
+        else:
+            hashVals.append(textHash)
+
+        retVals["status_code"] = status_code
+        retVals['sha256'] = textHash
+        retVals["content-type"] = x.headers['content-type']
+        retVals["title"] = title 
+        retVals["text"] = text
+        retVals["links"] = [];
+
+        for atag in soup.find_all(["a"]):
+            link = atag.get('href')
+
+            if link:
+                if link == "/":
+                    continue
+
+                if not re.search(r'^.*:\/\/', link):
+                    link = urljoin(url, link)
+
+                link = urlClean(link)
+                
+                #link = re.sub(r'\/+', '/', link)
+
+                if link not in retVals["links"]:
+                    if preservePath:
+                        if re.search(f"^{seed}.*", link):
+                            unvisited[link] = 1;
+
+                    elif sticky:
+                        if re.search(r"^.*://.*" + seedHost, link):
+                                unvisited[link] = 1;
+                    else:
+                        unvisited[link] = 1;
+
+                    retVals["links"].append(link)
+
+    try:
+        del unvisited[url]
+    except:
+        pass
+
+    visited[url] = textHash 
+    print(json.dumps(retVals, indent=4))
+    return retVals
+
+# Loop throught links list
+def loop(links):
+    for link in links.copy():
+        #time.sleep(1)
+        getData(link)
+        sys.stdout.flush()
+
+        # Handle our exit sentry
+        if Sentry:
+            writeLinks()
+            sys.exit(1)
+
+
+# Begin main
+try:
+    opts, args = getopt.getopt(argv, "u:h:spc")
+except:
+    help()
+
+if not opts:
+    help()
+
+# Populate arguments
+for opt, arg in opts:
+    if opt == '-u':
+        seed = arg
+        seedHost = urlHost(seed) 
+    elif opt == '-s':
+        sticky = True 
+    elif opt == '-c':
+        if exists(visitedFile):
+            os.remove(visitedFile)
+        if exists(unvisitedFile):
+            os.remove(unvisitedFile)
+    elif opt == '-p':
+        preservePath = True
+    elif opt == '-h':
+        help()
+
+# Populate visited dict if file exists.
+if exists(visitedFile):
+    f = open(visitedFile, "r")
+    lines = f.readlines()
+
+    for line in lines:
+        line = line.strip()
+        values = line.split('<:>')
+        visited[values[1]] = values[0]
+        hashVals.append(values[0])
+
+    f.close()
+
+# Populate unvisited dict if file exists.
+if exists(unvisitedFile):
+    f = open(unvisitedFile, "r")
+    lines = f.readlines()
+
+    for line in lines:
+        line = line.strip()
+        if line not in visited:
+            unvisited[line] = 1
+
+    f.close()
+
+# Begin crawling with the seed url.
+getData(seed)
+
+# While we have unvisited links loop.
+while len(unvisited) > 0:
+    loop(unvisited)
+
+# On finish write visited data and delete unvisited. 
+writeLinks()
+os.remove(unvisitedFile)
