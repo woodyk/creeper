@@ -1,4 +1,5 @@
 beautifulsoup4==4.11.1
 elasticsearch==8.5.3
 requests==2.27.1
-requests_html==0.10.0
+selenium==4.7.2
+webdriver_manager==3.8.5

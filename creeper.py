@@ -12,10 +12,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver import ChromeOptions
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
-import dumper
 from bs4 import BeautifulSoup
 from urllib.parse import quote, urlparse, urlunparse, urljoin
-from requests_html import HTMLSession
 import json
 import hashlib
 import sys
