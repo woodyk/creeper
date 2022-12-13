@@ -6,6 +6,13 @@
 #   https://crawler-test.com/
 #   https://books.toscrape.com
 
+from selenium.webdriver import Chrome
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver import ChromeOptions
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+
+import dumper
 from bs4 import BeautifulSoup
 from urllib.parse import quote, urlparse, urlunparse, urljoin
 from requests_html import HTMLSession
@@ -38,6 +45,7 @@ unvisited = {}
 hashVals = [] 
 Sentry = False
 es = False
+dynamic = False
 
 # Set the user agent for requests
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0'}
@@ -49,6 +57,7 @@ def help():
     print("\t-h\tThis help output.")
     print("\t-e\tElastic search host.")
     print("\t-p\tSticky to URL path.")
+    print("\t-d\tEnable dynamic page processing.")
     print("\t-f\tMake creeper follow outside links.")
     print("\t-c\tClear out visited and unvisited domains lists.")
     sys.exit()
@@ -88,8 +97,6 @@ def checkVisited(url):
            del unvisited[url]
         except:
             pass
-        
-        return 1
 
 def urlClean(url):
     orig = url
@@ -133,17 +140,16 @@ def crawl(url):
     try:
         x = requests.get(url, timeout=5, allow_redirects=True, headers=headers)
         status_code = x.status_code 
+        html = x.text
     except:
         visited[url] = str(random.getrandbits(256))
         return
 
-    # Handle dynamic pages
-    #session = HTMLSession()
-    #r = session.get(url)
-    #r.html.render(sleep=2)
-    #html = r.html.html
-    #session.close()
-    #eprint(html)
+    if dynamic:
+        session.get(url)
+        time.sleep(2)
+        html = session.page_source
+        #perfLog = session.get_log('performance')
 
     if x.history:
         retVals['redirect'] = {}
@@ -173,9 +179,7 @@ def crawl(url):
 
 
     if status_code:
-        soup = BeautifulSoup(x.text, 'html.parser')
-
-        #print(soup)
+        soup = BeautifulSoup(html, 'html.parser')
 
         # Check for base url
         base = soup.find('base')
@@ -240,8 +244,6 @@ def crawl(url):
 
                 link = urlClean(link)
                 
-                #link = re.sub(r'\/+', '/', link)
-
                 if link not in retVals["links"]:
                     if preservePath:
                         if re.search(f"^{seed}.*", link):
@@ -319,7 +321,7 @@ def start(seed):
 
 if __name__ == "__main__":
     try:
-        opts, args = getopt.getopt(argv, "e:u:h:fpc")
+        opts, args = getopt.getopt(argv, "e:u:h:dfpc")
     except:
         help()
 
@@ -338,6 +340,14 @@ if __name__ == "__main__":
                 os.remove(visitedFile)
             if exists(unvisitedFile):
                 os.remove(unvisitedFile)
+        elif opt == '-d':
+            dynamic = True
+            options = ChromeOptions()
+            options.headless = True
+            #desired_capabilities = DesiredCapabilities.CHROME
+            #desired_capabilities['goog:loggingPrefs'] = {'performance':'ALL'}
+            #session = Chrome(service=Service(ChromeDriverManager().install()), options=options, desired_capabilities=desired_capabilities)
+            session = Chrome(service=Service(ChromeDriverManager().install()), options=options)
         elif opt == '-p':
             preservePath = True
         elif opt == '-e':
