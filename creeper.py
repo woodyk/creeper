@@ -2,10 +2,13 @@
 #
 # mycrawler.py -- Wadih Khairallah
 #
-# Great site for testing https://crawler-test.com/
+# Great sites for testing:
+#   https://crawler-test.com/
+#   https://books.toscrape.com
 
 from bs4 import BeautifulSoup
 from urllib.parse import quote, urlparse, urlunparse, urljoin
+from requests_html import HTMLSession
 import json
 import hashlib
 import sys
@@ -19,20 +22,22 @@ import getopt
 import signal
 import re
 import time
+from elasticsearch import Elasticsearch
 
 # Get options
 argv = sys.argv[1:]
+
+# Global variables
 visitedFile = '/tmp/visited.txt'
 unvisitedFile = '/tmp/unvisited.txt'
-seed = str() 
-seedHost = str() 
-sticky = False;
+follow = False;
 preservePath = False
 depth = 5
 visited = {}
 unvisited = {}
 hashVals = [] 
-Sentry = False 
+Sentry = False
+es = False
 
 # Set the user agent for requests
 headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; rv:91.0) Gecko/20100101 Firefox/91.0'}
@@ -42,8 +47,9 @@ def help():
     print(__file__, " -u [seed url] [options]")
     print("\t-u\tSeed URL to start with.")
     print("\t-h\tThis help output.")
+    print("\t-e\tElastic search host.")
     print("\t-p\tSticky to URL path.")
-    print("\t-s\tMake crawler sticky to the given URL and subdomains.")
+    print("\t-f\tMake creeper follow outside links.")
     print("\t-c\tClear out visited and unvisited domains lists.")
     sys.exit()
 
@@ -104,7 +110,7 @@ def urlHost(url):
     return san.netloc
 
 # Extract data from given URLs
-def getData(url):
+def crawl(url):
     retVals = {}
     textHash = str()
     status_code = int()
@@ -113,7 +119,7 @@ def getData(url):
 
     retVals["url"] = url 
 
-    eprint("Link:" + '[' + str(len(unvisited)) + '] ' + url)
+    eprint("Links:" + '[' + str(len(unvisited)) + '] ' + url)
 
     if checkVisited(url) == 1:
         return
@@ -121,8 +127,8 @@ def getData(url):
     try:
         socket.gethostbyname(hostname)
     except:
-        status_code = "no resolve"
-        pass
+        visited[url] = str(random.getrandbits(256))
+        return
 
     try:
         x = requests.get(url, timeout=5, allow_redirects=True, headers=headers)
@@ -130,6 +136,14 @@ def getData(url):
     except:
         visited[url] = str(random.getrandbits(256))
         return
+
+    # Handle dynamic pages
+    #session = HTMLSession()
+    #r = session.get(url)
+    #r.html.render(sleep=2)
+    #html = r.html.html
+    #session.close()
+    #eprint(html)
 
     if x.history:
         retVals['redirect'] = {}
@@ -141,8 +155,8 @@ def getData(url):
                 getCode = False
 
             retVals['redirect'][i.url] = i.status_code
-            eprint("\tredir: " + str(i.status_code) + " " + i.url)
             visited[i.url] = str(random.getrandbits(256))
+            eprint("\tredir: " + str(i.status_code) + " " + i.url)
 
         retVals['redirect'][x.url] = x.status_code
         eprint("\tredir: " + str(x.status_code) + " " + x.url)
@@ -150,8 +164,8 @@ def getData(url):
 
         redirHost = urlHost(x.url)
 
-        if sticky:
-            if redirHost != hostname:
+        if not follow:
+            if not re.search(r"^.*://.*" + seedHost, url):
                 return
          
         if checkVisited(url) == 1:
@@ -233,7 +247,7 @@ def getData(url):
                         if re.search(f"^{seed}.*", link):
                             unvisited[link] = 1;
 
-                    elif sticky:
+                    elif not follow:
                         if re.search(r"^.*://.*" + seedHost, link):
                                 unvisited[link] = 1;
                     else:
@@ -248,13 +262,17 @@ def getData(url):
 
     visited[url] = textHash 
     print(json.dumps(retVals, indent=4))
+
+    if es:
+        eresp = es.index(index="creeper", id=url, document=retVals)
+
     return retVals
 
 # Loop throught links list
 def loop(links):
     for link in links.copy():
         #time.sleep(1)
-        getData(link)
+        crawl(link)
         sys.stdout.flush()
 
         # Handle our exit sentry
@@ -262,65 +280,72 @@ def loop(links):
             writeLinks()
             sys.exit(1)
 
+def start(seed):
+    # Populate visited dict if file exists.
+    if exists(visitedFile):
+        f = open(visitedFile, "r")
+        lines = f.readlines()
+    
+        for line in lines:
+            line = line.strip()
+            values = line.split('<:>')
+            visited[values[1]] = values[0]
+            hashVals.append(values[0])
+    
+        f.close()
 
-# Begin main
-try:
-    opts, args = getopt.getopt(argv, "u:h:spc")
-except:
-    help()
+    # Populate unvisited dict if file exists.
+    if exists(unvisitedFile):
+        f = open(unvisitedFile, "r")
+        lines = f.readlines()
+    
+        for line in lines:
+            line = line.strip()
+            if line not in visited:
+                unvisited[line] = 1
 
-if not opts:
-    help()
+        f.close()
 
-# Populate arguments
-for opt, arg in opts:
-    if opt == '-u':
-        seed = arg
-        seedHost = urlHost(seed) 
-    elif opt == '-s':
-        sticky = True 
-    elif opt == '-c':
-        if exists(visitedFile):
-            os.remove(visitedFile)
-        if exists(unvisitedFile):
-            os.remove(unvisitedFile)
-    elif opt == '-p':
-        preservePath = True
-    elif opt == '-h':
+    # Begin crawling with the seed url.
+    crawl(seed)
+
+    # While we have unvisited links loop.
+    while len(unvisited) > 0:
+        loop(unvisited)
+
+    # On finish write visited data and delete unvisited. 
+    writeLinks()
+    os.remove(unvisitedFile)
+
+if __name__ == "__main__":
+    try:
+        opts, args = getopt.getopt(argv, "e:u:h:fpc")
+    except:
         help()
 
-# Populate visited dict if file exists.
-if exists(visitedFile):
-    f = open(visitedFile, "r")
-    lines = f.readlines()
+    if not opts:
+        help()
 
-    for line in lines:
-        line = line.strip()
-        values = line.split('<:>')
-        visited[values[1]] = values[0]
-        hashVals.append(values[0])
+    # Populate arguments
+    for opt, arg in opts:
+        if opt == '-u':
+            seed = arg
+            seedHost = urlHost(seed) 
+        elif opt == '-f':
+            follow = True 
+        elif opt == '-c':
+            if exists(visitedFile):
+                os.remove(visitedFile)
+            if exists(unvisitedFile):
+                os.remove(unvisitedFile)
+        elif opt == '-p':
+            preservePath = True
+        elif opt == '-e':
+            if re.search(r'^http.*:\/\/.*:\d{1,5}', arg):
+                es = Elasticsearch(arg)
+            else:
+                help()
+        elif opt == '-h':
+            help()
 
-    f.close()
-
-# Populate unvisited dict if file exists.
-if exists(unvisitedFile):
-    f = open(unvisitedFile, "r")
-    lines = f.readlines()
-
-    for line in lines:
-        line = line.strip()
-        if line not in visited:
-            unvisited[line] = 1
-
-    f.close()
-
-# Begin crawling with the seed url.
-getData(seed)
-
-# While we have unvisited links loop.
-while len(unvisited) > 0:
-    loop(unvisited)
-
-# On finish write visited data and delete unvisited. 
-writeLinks()
-os.remove(unvisitedFile)
+    start(seed)

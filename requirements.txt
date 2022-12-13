@@ -1,3 +1,4 @@
 beautifulsoup4==4.11.1
-ndjson==0.3.1
+elasticsearch==8.5.3
 requests==2.27.1
+requests_html==0.10.0
