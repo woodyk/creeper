@@ -5,12 +5,17 @@
 # Great sites for testing:
 #   https://crawler-test.com/
 #   https://books.toscrape.com
+#
+# Ubuntu Server Setup
+#wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+#sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+# sudo apt-get update
+# sudo apt-get install google-chrome-stable
 
-from selenium.webdriver import Chrome
-from selenium.webdriver.chrome.service import Service
+from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver import ChromeOptions
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from webdriver_manager.firefox import GeckoDriverManager
+#from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 
 from bs4 import BeautifulSoup
 from urllib.parse import quote, urlparse, urlunparse, urljoin
@@ -144,10 +149,10 @@ def crawl(url):
         return
 
     if dynamic:
-        session.get(url)
+        driver.get(url)
         time.sleep(2)
-        html = session.page_source
-        #perfLog = session.get_log('performance')
+        html = driver.page_source
+        #perfLog = driver.get_log('performance')
 
     if x.history:
         retVals['redirect'] = {}
@@ -340,12 +345,20 @@ if __name__ == "__main__":
                 os.remove(unvisitedFile)
         elif opt == '-d':
             dynamic = True
-            options = ChromeOptions()
+
+            # Firefox
+            options = webdriver.FirefoxOptions()
             options.headless = True
+            driver = webdriver.Firefox(service=webdriver.firefox.service.Service(GeckoDriverManager().install(), log_path='/dev/null'), options=options)
+
+            # Google Chrome
+            #options = webdriver.ChromeOptions()
+            #options.headless = True
             #desired_capabilities = DesiredCapabilities.CHROME
             #desired_capabilities['goog:loggingPrefs'] = {'performance':'ALL'}
-            #session = Chrome(service=Service(ChromeDriverManager().install()), options=options, desired_capabilities=desired_capabilities)
-            session = Chrome(service=Service(ChromeDriverManager().install()), options=options)
+            #driver = webdriver.Chrome(service=webdriver.chrome.service.Service(ChromeDriverManager().install()), options=options, desired_capabilities=desired_capabilities)
+            #driver = webdriver.Chrome(service=webdriver.chrome.service.Service(ChromeDriverManager().install()), options=options)
+
         elif opt == '-p':
             preservePath = True
         elif opt == '-e':
