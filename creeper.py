@@ -7,10 +7,11 @@
 #   https://books.toscrape.com
 #
 # Ubuntu Server Setup
-#wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
-#sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
+# wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+# sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
 # sudo apt-get update
 # sudo apt-get install google-chrome-stable
+# sudo apt-get install firefox
 
 from selenium import webdriver
 from webdriver_manager.chrome import ChromeDriverManager
@@ -180,7 +181,6 @@ def crawl(url):
         if checkVisited(url) == 1:
             return
 
-
     if status_code:
         soup = BeautifulSoup(html, 'html.parser')
 
@@ -188,7 +188,7 @@ def crawl(url):
         base = soup.find('base')
         if base:
             try:
-                del unvisted[url]
+                del unvisited[url]
             except:
                 pass
 
@@ -220,7 +220,7 @@ def crawl(url):
             eprint("\tHex match: " + textHash + " skipping...")
             visited[url] = textHash 
             try:
-                del unvisted[url]
+                del unvisited[url]
             except:
                 pass
 
