@@ -34,6 +34,7 @@ import signal
 import re
 import time
 from elasticsearch import Elasticsearch
+import shutil
 
 # Get options
 argv = sys.argv[1:]
@@ -42,7 +43,9 @@ argv = sys.argv[1:]
 visitedFile = '/tmp/visited.txt'
 unvisitedFile = '/tmp/unvisited.txt'
 follow = False;
+download_pictures = False  # Added option for downloading pictures
 preservePath = False
+download_pdf = False
 depth = 5
 visited = {}
 unvisited = {}
@@ -60,7 +63,8 @@ def help():
     print("\t-u\tSeed URL to start with.")
     print("\t-h\tThis help output.")
     print("\t-e\tElastic search host.")
-    print("\t-p\tSticky to URL path.")
+    print("\t-p\tPreserve URI path.")
+    print("\t-g\tDownload PDF files.")
     print("\t-d\tEnable dynamic page processing.")
     print("\t-f\tMake creeper follow outside links.")
     print("\t-c\tClear out visited and unvisited domains lists.")
@@ -70,6 +74,24 @@ def help():
 def handler(signum, frame):
     global Sentry
     Sentry = True 
+
+# pdf download function
+def download_pdf_file(url):
+    response = requests.get(url, stream=True)
+    file_name = url.split("/")[-1]
+    with open(file_name, 'wb') as out_file:
+        shutil.copyfileobj(response.raw, out_file)
+    del response
+
+# picture download function
+def download_picture(url):
+    response = requests.get(url, stream=True)
+    file_name = url.split("/")[-1]
+    if not any(file_name.lower().endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.gif']):
+        return
+    with open(file_name, 'wb') as out_file:
+        shutil.copyfileobj(response.raw, out_file)
+    del response
 
 # Capture signals
 signal.signal(signal.SIGINT, handler)
@@ -238,6 +260,9 @@ def crawl(url):
         for atag in soup.find_all(["a"]):
             link = atag.get('href')
 
+            if link and link.endswith('.pdf') and download_pdf:
+                download_pdf_file(link)
+
             if link:
                 if link == "/":
                     continue
@@ -259,6 +284,7 @@ def crawl(url):
                         unvisited[link] = 1;
 
                     retVals["links"].append(link)
+                    
 
     try:
         del unvisited[url]
@@ -270,6 +296,15 @@ def crawl(url):
 
     if es:
         eresp = es.index(index="creeper", id=url, document=retVals)
+
+    # Download pictures
+    if download_pictures:
+        for imgtag in soup.find_all("img"):
+            img_url = imgtag.get("src")
+            if img_url:
+                if not re.search(r'^.*:\/\/', img_url):
+                    img_url = urljoin(url, img_url)
+                download_picture(img_url)
 
     return retVals
 
@@ -324,7 +359,7 @@ def start(seed):
 
 if __name__ == "__main__":
     try:
-        opts, args = getopt.getopt(argv, "e:u:h:dfpc")
+        opts, args = getopt.getopt(argv, "e:u:h:dfpcg")
     except:
         help()
 
@@ -366,7 +401,13 @@ if __name__ == "__main__":
                 es = Elasticsearch(arg)
             else:
                 help()
+        elif opt == '-g':
+            download_pdf = True
         elif opt == '-h':
             help()
+        elif opt == '-l':
+            level = arg
+        elif opt == '-i':
+            download_pictures = True
 
     start(seed)
