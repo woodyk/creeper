@@ -3,6 +3,13 @@
 #
 # File: creeper.py
 # Author: Wadih Khairallah
+# Description: 
+# Created: 2025-04-26 14:54:34
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# File: creeper.py
+# Author: Wadih Khairallah
 # Description: Optimized self-hosted web crawler with generic file downloads,
 #              session-based output, and resumable sessions. All session state
 #              (configuration, visited/unvisited, buffer, logs) is stored in the
